@@ -14,6 +14,7 @@ figTitles = ["RelTA", "TVol", "TAbl", "AblZne", "HtAbl"];
 VarI = 1;
 modelname = 'EP2Dnew.mph';
 
+addpath(fullfile(pwd,'data'),fullfile(pwd,'src'))
 
 % Setup the input parameters
 % ---------------------------
@@ -98,7 +99,7 @@ if ismember(1, phases)
             Ymcs = [Ymcs; newSamEval{i,end}{1, 2}];
         end
         
-        save('MCSdata','samEval','Xmcs','Ymcs');
+        save('data\MCSdata','samEval','Xmcs','Ymcs');
         
     end
     
@@ -121,7 +122,7 @@ if ismember(2, phases)
         model = UtilFuncs.loadCOMSOLfile(modelname);
         QoI = UtilFuncs.solve_COMSOL_EPlist(model,params(1:end,:));
         UtilFuncs.endComsolmphserver();
-        save('trainData','params','QoI');
+        save('data\trainData','params','QoI');
         sample = params;
         evals = QoI;
     end
@@ -211,7 +212,7 @@ if ismember(4, phases)
         methodNames(ii) = allmethodNames(modlchoice(ii));
     end
     
-    save('MetaModels', 'metaModels', 'valerrs', 'looerrs', 'times', 'methodNames')
+    save('data\MetaModels', 'metaModels', 'valerrs', 'looerrs', 'times', 'methodNames')
 end
 
 
