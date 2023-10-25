@@ -17,12 +17,12 @@ classdef Models
 			if contains(mdlOpt,'GPR') % Kriging/GPR
 				MetaOpts.MetaType = 'Kriging';
 				MetaOpts.EstimMethod  = 'CV';
-				MetaOpts.Optim.Display = 'iter';
+                % MetaOpts.Optim.Display = 'iter';
 				MetaOpts.Optim.Maxiter = 60;
             elseif contains(mdlOpt,'PCE') % Polynomial chaos expansion
 				MetaOpts.MetaType = 'PCE';
 				MetaOpts.TruncOptions.qNorm = 0.7:0.1:1;
-% 				MetaOpts.Display = 'verbose';
+                % MetaOpts.Display = 'verbose';
             elseif contains(mdlOpt,'PCK') % Polynomial chaos kriging
 				MetaOpts.MetaType = 'PCK';
 				MetaOpts.PCE.Method = 'LARS';
@@ -30,7 +30,7 @@ classdef Models
 				MetaOpts.PCE.TruncOptions.qNorm = 0.7:0.1:1;
 				MetaOpts.Kriging.Corr.Family = 'matern-5_2';
 				MetaOpts.Optim.Maxiter = 60;
-				MetaOpts.Optim.Display = 'iter';
+                % MetaOpts.Optim.Display = 'iter';
 			end
 			
 			switch mdlOpt % Model choice
@@ -77,9 +77,12 @@ classdef Models
 				case "GPR-Cust"
 					MetaOpts.Scaling = true;
 					[Xtrainc, Ytrainc] = Models.SVMdata(Xtrain, Ytrain);
-					[Xvalc, Yvalc] = Models.SVMdata(Xval, Yval);
-					global SVC;
-					SVC = Models.buildModel(Xtrainc, Ytrainc, Xvalc, Yvalc, "SVMC");
+                    [~, Yvalc] = Models.SVMdata(Xval, Yval);
+                    muX = mean(Xtrain);
+                    StdX = std(Xtrain);
+                    Xvalc = bsxfun(@rdivide, (bsxfun(@minus, Xval, muX)), StdX);
+                    global SVC;
+                    SVC = Models.buildModel(Xtrainc, Ytrainc, Xvalc, Yvalc, "SVMC");
 					MetaOpts.Corr.Handle = @Models.my_eval_R;
 					nOpars = 3;
 					BoundsL = [ones(1,nOpars)*1e-2] ;
@@ -106,6 +109,10 @@ classdef Models
 			valerr = mdl.Error.Val;
 			looerr = mdl.Error.LOO;
 			btime = mdl.Internal.buildTime;
+            
+            if mdlOpt == "GPR-Cust"
+                mdl.Internal.SVM = SVC;
+            end
 
 		end
 		
@@ -118,7 +125,20 @@ classdef Models
 			R = zeros(size(x1,1), size(x2,1));
 
 			% Evaluating SVM classifier values
-			global SVC;
+            % !!! If SVC is empty, kindly set the value of the global 
+            % variable SVC using the following code. !!!
+            %
+            %   global SVC;
+            %   SVC = GPRcustom.Internal.SVM;
+            % 
+            % !!! Run the above code before evaluating GPR custom model !!!
+            
+			global SVC; 
+            
+            if isempty(SVC)
+                error('Set _GPRmodelVariable_.Internal.SVM as global SVC');
+            end
+            
 			[~,d1] = uq_evalModel(SVC,x1);
 			[~,d2] = uq_evalModel(SVC,x2);
 			
@@ -157,13 +177,13 @@ classdef Models
 				end
 			end
 
-		end
-		
+        end
+        
 		% Preping data for SVM classifier 
 		% -----------------------------------
 		function [X, Y] = SVMdata(Xval,Yval)
 			X = normalize(Xval);
-			Y = (Yval>=100)*2-1;
+			Y = (abs(Yval-100)<1e-8)*2-1;
 		end
 		
 		% Postprocessing metamodel value to be bounded to phyiscal values 
@@ -226,6 +246,15 @@ classdef Models
                     errs(i) = sqrt(mean((Y - uq_evalModel(myMdl,X)).^2));
                 end
             end
+        end
+        
+        % Function to calculate the lower bound of nugget parameter
+		% ----------------------------------------------------------
+        function nu = nuggetLB(GP)
+            a = 20;
+            lamb = max(eig(GP.Internal.Kriging.GP.R));
+            C = cond(GP.Internal.Kriging.GP.R);
+            nu = max([lamb*(C-exp(a))/C/(exp(a)-1),0]);
         end
 	
     end

@@ -11,7 +11,7 @@ rng default % for reproducibility
 
 Markers = {'+','o','*','x','v','d','^','s','>','<'};
 figTitles = ["RelTA", "TVol", "TAbl", "AblZne", "HtAbl"];
-VarI = 1;
+VarI = 1; % 1 - Relative tumor ablation, 4 - Total ablation volume
 modelname = 'EP2Dnew.mph';
 
 addpath(fullfile(pwd,'data'),fullfile(pwd,'src'))
@@ -22,10 +22,10 @@ InputOpts = UtilFuncs.createInputs(5);
 myInput = uq_createInput(InputOpts);
 
 % Choose the phases.
-% --------------------------------------------------------------------
-% 1-MCS, 2-Load/train data, 3-SVM, 4-Build metamodels, 5-Plot results
-% --------------------------------------------------------------------
-phases = 1:5;
+% ----------------------------------------------------------------------------------------------
+% 1-MCS, 2-Load/train data, 3-SVM, 4-Build metamodels, 5-Plot results, 6-Voltage optimization
+% ----------------------------------------------------------------------------------------------
+phases = 1:6;
 
 % Monte-Carlo Simulation (MCS)
 % =============================
@@ -195,7 +195,7 @@ if ismember(4, phases)
     allmethodNames = ["GPR-linear", "GPR-exponential", "GPR-Gaussian", "GPR-Matern5/2", ...
         "PCE-OLS", "PCE-LARS", "PCE-OMP", "PCE-SP", "PCE-BCS", ...
         "PCK-Seq", "PCK-Opt", "GPR-Cust"];
-    modlchoice = 1:12;
+    modlchoice = 1:12; % Don't use GPR-Cust for total ablation volume !!!
     metaModels = cell(length(modlchoice),1);
     
     % Empty containers for errors and build time
@@ -208,7 +208,8 @@ if ismember(4, phases)
     % Build different metamodels with training data
     % ----------------------------------------------
     for ii = 1:length(modlchoice)
-        [metaModels{ii}, valerrs(ii), looerrs(ii), times(ii)] = Models.buildModel(Xtrain, Ytrain, Xval, Yval, allmethodNames(modlchoice(ii)));
+        [metaModels{ii}, valerrs(ii), looerrs(ii), times(ii)] = ...
+            Models.buildModel(Xtrain, Ytrain, Xval, Yval, allmethodNames(modlchoice(ii)));
         methodNames(ii) = allmethodNames(modlchoice(ii));
     end
     
@@ -255,4 +256,62 @@ if ismember(5, phases)
     % -----------------------------
     FigPlots
     
+end
+
+% Treatment planning
+% =============================
+if ismember(6, phases)
+    
+    % Setup the input parameters as bounded Gaussian
+    % ------------------------------------------------
+    InputOpts = UtilFuncs.createInputs(4, true);
+    myInput = uq_createInput(InputOpts);
+    
+    % Initialize variables
+    %----------------------
+    nsamples = 800;
+    timesMM = 0;
+    timesCOMSOL = 0;
+    iii = 1;
+    initParam = 1500;
+    lb = 0;
+    ub = 3000;
+    resultsGPR = nan(1,nsamples);
+    resultsCOMSOL = nan(1,nsamples);
+    
+    % Load the COMSOL and GPR custom model
+    % --------------------------------------
+    MMmodels = load('MetaModels');
+    MMmodel = MMmodels.metaModels{end};
+    MMmodel = UtilFuncs.save_Rinv(MMmodel); % Save the Rinv
+    
+    modelname = 'EP2Dnew.mph';
+    model = UtilFuncs.loadCOMSOLfile(modelname);
+    
+    % Sample parameter configurations
+    %----------------------------------
+    rng default % for reproducibility
+    paramconfigs = uq_getSample(nsamples,'MC');
+    
+    % Run optimizations for each parameter configuration
+    %-----------------------------------------------------
+    for paramconfig = paramconfigs'
+        ObjFuncGPR = @(V) V/3000 - Models.postpro(MMmodel, [paramconfig', V]);
+        ObjFuncCOMSOL = @(V)  V/3000 - UtilFuncs.solve_COMSOL_getQoI(model, [paramconfig', V],1);
+        
+        tic;
+        resultsGPR(iii) = UtilFuncs.TP_optimization(ObjFuncGPR,initParam,lb,ub);
+        timesMM = timesMM + toc;
+        tic;
+        resultsCOMSOL(iii) = UtilFuncs.TP_optimization(ObjFuncCOMSOL,initParam,lb,ub);
+        timesCOMSOL = timesCOMSOL + toc;
+        iii = iii+1;
+    end
+    
+    timesMM = timesMM / nsamples;
+    timesCOMSOL = timesCOMSOL / nsamples;
+    
+    UtilFuncs.endComsolmphserver();
+    
+    save('data\TPopt', 'MMmodel', 'paramconfigs', 'resultsCOMSOL', 'resultsGPR', 'timesCOMSOL', 'timesMM')
 end
